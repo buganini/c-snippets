@@ -1,0 +1,1 @@
+sc create relayd2 binPath= "c:\relayd.exe localhost /log.php tcpdump -i 2" start= auto
