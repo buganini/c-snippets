@@ -1,0 +1,154 @@
+diff -ruN config.orig/config.h config/config.h
+--- config.orig/config.h	2008-11-23 05:12:47.000000000 +0800
++++ config/config.h	2009-02-21 02:09:00.000000000 +0800
+@@ -81,6 +81,7 @@
+ struct device {
+ 	int	d_done;			/* processed */
+ 	char	*d_name;		/* name of device (e.g. rk11) */
++	char	*section;
+ #define	UNKNOWN -2	/* -2 means not set yet */
+ 	STAILQ_ENTRY(device) d_next;	/* Next one in list */
+ };
+@@ -106,6 +107,7 @@
+  */
+ struct cputype {
+ 	char	*cpu_name;
++	char	*section;
+ 	SLIST_ENTRY(cputype) cpu_next;
+ };
+ 
+@@ -119,6 +121,7 @@
+ struct opt {
+ 	char	*op_name;
+ 	char	*op_value;
++	char	*section;
+ 	int	op_ownfile;	/* true = own file, false = makefile */
+ 	SLIST_ENTRY(opt) op_next;
+ 	SLIST_ENTRY(opt) op_append;
+diff -ruN config.orig/config.y config/config.y
+--- config.orig/config.y	2008-11-23 05:12:47.000000000 +0800
++++ config/config.y	2009-02-21 02:09:00.000000000 +0800
+@@ -22,6 +22,8 @@
+ %token	NOOPTION
+ %token	MAKEOPTIONS
+ %token	NOMAKEOPTION 
++%token	SECTION
++%token	NOSECTION
+ %token	SEMICOLON
+ %token	INCLUDE
+ %token	FILES
+@@ -29,6 +31,7 @@
+ %token	<str>	ID
+ %token	<val>	NUMBER
+ 
++%type	<str>	Sec_name
+ %type	<str>	Save_id
+ %type	<str>	Opt_value
+ %type	<str>	Dev
+@@ -91,6 +94,8 @@
+ struct  files_name_head fntab;
+ char	errbuf[80];
+ int	maxusers;
++char	section_init[]="main";
++char	*section=section_init;
+ 
+ #define ns(s)	strdup(s)
+ int include(const char *, int);
+@@ -126,6 +131,8 @@
+ 		;
+ 
+ Spec:
++	Section_spec SEMICOLON
++		|
+ 	Device_spec SEMICOLON
+ 		|
+ 	Config_spec SEMICOLON
+@@ -147,6 +154,41 @@
+ 	error SEMICOLON
+ 		;
+ 
++Section_spec:
++	SECTION Sec_name { section = $2; } |
++	NOSECTION Sec_name {
++		struct cputype *cp, *cp2;
++		SLIST_FOREACH_SAFE(cp, &cputype, cpu_next, cp2) {
++			if (eq(cp->section, $2)){
++				SLIST_REMOVE(&cputype, cp, cputype, cpu_next);
++				free(cp);
++			}
++		}
++		struct opt *op, *op2;
++		SLIST_FOREACH_SAFE(op, &opt, op_next, op2){
++			if(eq(op->section, $2)){
++				SLIST_REMOVE(&opt, op, opt, op_next);
++				free(op->op_name);
++				free(op);
++			}
++		}
++		SLIST_FOREACH_SAFE(op, &mkopt, op_next, op2){
++			if(eq(op->section, $2)){
++				SLIST_REMOVE(&mkopt, op, opt, op_next);
++				free(op->op_name);
++				free(op);
++			}
++		}
++		struct device *dp, *dp2;
++		STAILQ_FOREACH_SAFE(dp, &dtab, d_next, dp2){
++			if (eq(dp->section, $2)){
++				STAILQ_REMOVE(&dtab, dp, device, d_next);
++				free(dp->d_name);
++				free(dp);
++			}
++		}
++	      }
++
+ Config_spec:
+ 	ARCH Save_id {
+ 		if (machinename != NULL && !eq($2, machinename))
+@@ -167,6 +209,7 @@
+ 		struct cputype *cp =
+ 		    (struct cputype *)calloc(1, sizeof (struct cputype));
+ 		cp->cpu_name = $2;
++		cp->section=section;
+ 		SLIST_INSERT_HEAD(&cputype, cp, cpu_next);
+ 	      } |
+ 	NOCPU Save_id {
+@@ -249,6 +292,10 @@
+ 	ID { $$ = $1; }
+ 	;
+ 
++Sec_name:
++	ID { $$ = $1; }
++	;
++
+ Mkopt_list:
+ 	Mkopt_list COMMA Mkoption
+ 		|
+@@ -365,6 +412,7 @@
+ 
+ 	np = (struct device *) calloc(1, sizeof *np);
+ 	np->d_name = name;
++	np->section = section;
+ 	STAILQ_INSERT_TAIL(&dtab, np, d_next);
+ }
+ 
+@@ -425,6 +473,7 @@
+ 	op->op_name = name;
+ 	op->op_ownfile = 0;
+ 	op->op_value = value;
++	op->section = section;
+ 	if (op2 != NULL) {
+ 		while (SLIST_NEXT(op2, op_append) != NULL)
+ 			op2 = SLIST_NEXT(op2, op_append);
+diff -ruN config.orig/lang.l config/lang.l
+--- config.orig/lang.l	2008-11-23 05:12:47.000000000 +0800
++++ config/lang.l	2009-02-21 02:09:00.000000000 +0800
+@@ -81,6 +81,8 @@
+ 	{ "options",	OPTIONS },
+ 	{ "nooption",	NOOPTION },
+ 	{ "nooptions",	NOOPTION },
++	{ "section",	SECTION },
++	{ "nosection",	NOSECTION },
+ 	{ "include",	INCLUDE },
+ 	{ "files", 	FILES },
+ 	{ 0, 0 },
