@@ -22,3 +22,4 @@ char * strndup(const char *str, size_t len){
 	memcpy(r,str,l);
 	r[l]=0;
 	return r;
+}
